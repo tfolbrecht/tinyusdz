@@ -2042,7 +2042,12 @@ bool ReconstructXformOpsFromProperties(
 
         auto it = properties.find(tok);
         if (it == properties.end()) {
-          PUSH_ERROR_AND_RETURN("Property `" + tok + "` not found.");
+          // The op may be authored inside an unselected variant (seen in
+          // Apple-authored USDZ). Treat the missing op as identity instead of
+          // failing the whole Prim.
+          DCOUT("Property `" + tok +
+                "` listed in xformOpOrder not found. Skipping.");
+          continue;
         }
         if (it->second.is_attribute_connection()) {
           PUSH_ERROR_AND_RETURN(

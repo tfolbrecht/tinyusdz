@@ -1052,19 +1052,30 @@ bool USDCReader::Impl::ParseProperty(const SpecType spec_type,
         auto p = pv.value();
         DCOUT("connectionPaths = " << to_string(p));
 
-        if (!p.IsExplicit()) {
-          PUSH_ERROR_AND_RETURN_TAG(
-              kTag, "`connectionPaths` must be composed of Explicit items.");
+        std::vector<Path> items;
+        if (p.IsExplicit()) {
+          items = p.GetExplicitItems();
+        } else {
+          // Newer USD(e.g. crate 0.10) may encode connections as
+          // prepended/appended items. Treat them like `targetPaths` does.
+          auto ps = DecodeListOp<Path>(p);
+          if (ps.empty()) {
+            PUSH_ERROR_AND_RETURN_TAG(kTag, "`connectionPaths` is empty.");
+          }
+          if (ps.size() > 1) {
+            PUSH_WARN(
+                "ListOp with multiple ListOpType is not supported for now. "
+                "Use the first one: " +
+                to_string(std::get<0>(ps[0])));
+          }
+          items = std::get<1>(ps[0]);
         }
-
-        // Must be explicit_items for now.
-        auto items = p.GetExplicitItems();
         if (items.size() == 0) {
           PUSH_ERROR_AND_RETURN_TAG(
-              kTag, "`connectionPaths` have empty Explicit items.");
+              kTag, "`connectionPaths` have empty items.");
         }
 
-        attr.set_connections(items); 
+        attr.set_connections(items);
 
       } else {
         PUSH_ERROR_AND_RETURN_TAG(

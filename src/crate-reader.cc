@@ -2587,6 +2587,12 @@ bool CrateReader::UnpackValueRep(const crate::ValueRep &rep,
       COMPRESS_UNSUPPORTED_CHECK(dty)
 
       if (rep.IsArray()) {
+
+        if (rep.GetPayload() == 0) { // empty array
+          value->Set(std::vector<std::string>());
+          return true;
+        }
+
         uint64_t n;
         if (!_sr->read8(&n)) {
           PUSH_ERROR("Failed to read the number of array elements.");
@@ -6228,11 +6234,12 @@ bool CrateReader::ReadBootStrap() {
     return false;
   }
 
-  // Currently up to 0.9.0
-  if ((version[0] == 0) && (version[1] < 10)) {
+  // Currently up to 0.10.0 (0.10.0 only adds the pathExpression value type
+  // over 0.9.0; the rest of the encoding is unchanged)
+  if ((version[0] == 0) && (version[1] < 11)) {
     // ok
   } else {
-    PUSH_ERROR_AND_RETURN_TAG(kTag, fmt::format("Unsupported version {}.{}.{}. TinyUSDZ supports version up to 0.9.0",
+    PUSH_ERROR_AND_RETURN_TAG(kTag, fmt::format("Unsupported version {}.{}.{}. TinyUSDZ supports version up to 0.10.0",
       _version[0], _version[1], _version[2]));
   }
 
