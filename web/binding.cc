@@ -359,6 +359,10 @@ class TinyUSDZLoaderNative {
     loaded_as_layer_ = true;
     filename_ = filename;
 
+    // Keep the source binary so layerToRenderScene can resolve USDZ assets
+    layer_binary_ = binary;
+    layer_is_usdz_ = is_usdz;
+
     return true;
   }
 
@@ -1208,8 +1212,7 @@ class TinyUSDZLoaderNative {
       return false;
     }
 
-    std::string empty;
-    return stageToRenderScene(stage, /* TODO: is_usdz*/false, empty);
+    return stageToRenderScene(stage, layer_is_usdz_, layer_binary_);
 
   }
 
@@ -1373,6 +1376,8 @@ class TinyUSDZLoaderNative {
 
   tinyusdz::Layer layer_;
   tinyusdz::Layer composed_layer_;
+  std::string layer_binary_;  // source binary for USDZ asset resolution
+  bool layer_is_usdz_{false};
   bool composited_{false};
   std::vector<std::string> search_paths_;
   std::string base_dir_{"./"};
@@ -1635,7 +1640,7 @@ EMSCRIPTEN_BINDINGS(tinyusdz_module) {
 
       // TODO: nested variants
       .function("hasVariants",
-                &TinyUSDZLoaderNative::hasInherits)
+                &TinyUSDZLoaderNative::hasVariants)
 
       .function("composeVariants",
                 &TinyUSDZLoaderNative::composeVariants)
