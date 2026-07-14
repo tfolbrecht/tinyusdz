@@ -830,6 +830,22 @@ class TinyUSDZLoaderNative {
     mesh.set("materialId", rmesh.material_id);
     mesh.set("doubleSided", rmesh.doubleSided);
 
+    // Per-face material assignment (GeomSubset with familyName='materialBind').
+    // faceIndices are triangle indices when the converter triangulated.
+    if (!rmesh.material_subsetMap.empty()) {
+      emscripten::val subsets = emscripten::val::array();
+      for (const auto &s : rmesh.material_subsetMap) {
+        emscripten::val sv = emscripten::val::object();
+        sv.set("name", s.first);
+        sv.set("materialId", s.second.material_id);
+        const auto &idx = s.second.indices();
+        sv.set("faceIndices",
+               emscripten::typed_memory_view(idx.size(), idx.data()));
+        subsets.call<void>("push", sv);
+      }
+      mesh.set("materialSubsets", subsets);
+    }
+
     // Vertex skinning data (aligned with `points` order)
     mesh.set("skelId", rmesh.skel_id);
     const auto &jw = rmesh.joint_and_weights;
