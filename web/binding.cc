@@ -826,7 +826,125 @@ class TinyUSDZLoaderNative {
     mesh.set("materialId", rmesh.material_id);
     mesh.set("doubleSided", rmesh.doubleSided);
 
+    // Vertex skinning data (aligned with `points` order)
+    mesh.set("skelId", rmesh.skel_id);
+    const auto &jw = rmesh.joint_and_weights;
+    if (jw.jointIndices.size() && jw.jointWeights.size()) {
+      mesh.set("jointIndices",
+               emscripten::typed_memory_view(jw.jointIndices.size(),
+                                             jw.jointIndices.data()));
+      mesh.set("jointWeights",
+               emscripten::typed_memory_view(jw.jointWeights.size(),
+                                             jw.jointWeights.data()));
+      mesh.set("jointElementSize", jw.elementSize);
+      mesh.set("geomBindTransform", detail::toArray(jw.geomBindTransform));
+    }
+
+    // BlendShape targets (key = USD BlendShape prim name)
+    if (!rmesh.targets.empty()) {
+      emscripten::val targets = emscripten::val::object();
+      for (const auto &t : rmesh.targets) {
+        emscripten::val tv = emscripten::val::object();
+        tv.set("pointIndices",
+               emscripten::typed_memory_view(t.second.pointIndices.size(),
+                                             t.second.pointIndices.data()));
+        tv.set("pointOffsets",
+               emscripten::typed_memory_view(
+                   t.second.pointOffsets.size() * 3,
+                   reinterpret_cast<const float *>(t.second.pointOffsets.data())));
+        tv.set("normalOffsets",
+               emscripten::typed_memory_view(
+                   t.second.normalOffsets.size() * 3,
+                   reinterpret_cast<const float *>(t.second.normalOffsets.data())));
+        targets.set(t.first, tv);
+      }
+      mesh.set("blendshapes", targets);
+    }
+
     return mesh;
+  }
+
+  emscripten::val getSceneMeta() const {
+    emscripten::val v = emscripten::val::object();
+    const auto &m = render_scene_.meta;
+    v.set("upAxis", m.upAxis);
+    v.set("framesPerSecond", m.framesPerSecond);
+    v.set("timeCodesPerSecond", m.timeCodesPerSecond);
+    v.set("metersPerUnit", m.metersPerUnit);
+    v.set("autoPlay", m.autoPlay);
+    if (m.startTimeCode) v.set("startTimeCode", m.startTimeCode.value());
+    if (m.endTimeCode) v.set("endTimeCode", m.endTimeCode.value());
+    return v;
+  }
+
+  int numSkeletons() const { return int(render_scene_.skeletons.size()); }
+
+  emscripten::val getSkeleton(int skel_id) const {
+    emscripten::val v = emscripten::val::object();
+    if (!loaded_ || (skel_id < 0) ||
+        (size_t(skel_id) >= render_scene_.skeletons.size())) {
+      return v;
+    }
+    const auto &sk = render_scene_.skeletons[size_t(skel_id)];
+    v.set("primName", sk.prim_name);
+    v.set("absPath", sk.abs_path);
+    v.set("displayName", sk.display_name);
+    v.set("animId", sk.anim_id);
+    v.set("root", buildSkelNodeRec(sk.root_node));
+    return v;
+  }
+
+  int numAnimations() const { return int(render_scene_.animations.size()); }
+
+  emscripten::val getAnimation(int anim_id) const {
+    emscripten::val v = emscripten::val::object();
+    if (!loaded_ || (anim_id < 0) ||
+        (size_t(anim_id) >= render_scene_.animations.size())) {
+      return v;
+    }
+    const auto &a = render_scene_.animations[size_t(anim_id)];
+    v.set("primName", a.prim_name);
+    v.set("absPath", a.abs_path);
+    v.set("displayName", a.display_name);
+
+    using CT = tinyusdz::tydra::AnimationChannel::ChannelType;
+    emscripten::val channels = emscripten::val::object();
+    for (const auto &joint : a.channels_map) {
+      emscripten::val jv = emscripten::val::object();
+      for (const auto &ch : joint.second) {
+        const auto &c = ch.second;
+        switch (ch.first) {
+          case CT::Translation:
+            jv.set("translation",
+                   samplerToVal<tinyusdz::tydra::vec3, 3>(c.translations));
+            break;
+          case CT::Rotation:
+            jv.set("rotation",
+                   samplerToVal<tinyusdz::tydra::quat, 4>(c.rotations));
+            break;
+          case CT::Scale:
+            jv.set("scale", samplerToVal<tinyusdz::tydra::vec3, 3>(c.scales));
+            break;
+          case CT::Transform:
+            jv.set("transform",
+                   samplerToVal<tinyusdz::tydra::mat4, 16>(c.transforms));
+            break;
+          case CT::Weight:
+            jv.set("weight", samplerToVal<float, 1>(c.weights));
+            break;
+        }
+      }
+      channels.set(joint.first, jv);
+    }
+    v.set("channels", channels);
+
+    emscripten::val bs = emscripten::val::object();
+    for (const auto &kv : a.blendshape_weights_map) {
+      bs.set(kv.first, samplerToVal<float, 1>(kv.second));
+    }
+    v.set("blendshapeWeights", bs);
+
+    return v;
   }
 
   int getDefaultRootNodeId() { return render_scene_.default_root_node; }
@@ -1154,6 +1272,60 @@ class TinyUSDZLoaderNative {
 
  private:
 
+  static emscripten::val buildSkelNodeRec(const tinyusdz::tydra::SkelNode &n) {
+    emscripten::val v = emscripten::val::object();
+    v.set("jointName", n.joint_name);
+    v.set("jointPath", n.joint_path);
+    v.set("jointId", n.joint_id);
+    v.set("bindTransform", detail::toArray(n.bind_transform));
+    v.set("restTransform", detail::toArray(n.rest_transform));
+    emscripten::val children = emscripten::val::array();
+    for (const auto &c : n.children) {
+      children.call<void>("push", buildSkelNodeRec(c));
+    }
+    v.set("children", children);
+    return v;
+  }
+
+  // Flatten an AnimationSampler into {times: Float32Array, values:
+  // Float32Array, interpolation, static?}. Float32Array constructor copies, so
+  // the returned arrays stay valid after this call.
+  template <typename T, size_t N>
+  static emscripten::val samplerToVal(
+      const tinyusdz::tydra::AnimationSampler<T> &s) {
+    emscripten::val v = emscripten::val::object();
+    std::vector<float> times;
+    std::vector<float> values;
+    times.reserve(s.samples.size());
+    values.reserve(s.samples.size() * N);
+    for (const auto &sample : s.samples) {
+      times.push_back(sample.t);
+      const float *p = reinterpret_cast<const float *>(&sample.value);
+      for (size_t i = 0; i < N; i++) {
+        values.push_back(p[i]);
+      }
+    }
+    v.set("times", emscripten::val::global("Float32Array")
+                       .new_(emscripten::typed_memory_view(times.size(),
+                                                           times.data())));
+    v.set("values", emscripten::val::global("Float32Array")
+                        .new_(emscripten::typed_memory_view(values.size(),
+                                                            values.data())));
+    v.set("interpolation",
+          (s.interpolation ==
+           tinyusdz::tydra::AnimationSampler<T>::Interpolation::Step)
+              ? std::string("step")
+              : std::string("linear"));
+    if (s.static_value) {
+      emscripten::val sv = emscripten::val::array();
+      const float *p = reinterpret_cast<const float *>(&s.static_value.value());
+      for (size_t i = 0; i < N; i++) {
+        sv.call<void>("push", p[i]);
+      }
+      v.set("static", sv);
+    }
+    return v;
+  }
 
   // Simple glTF-like Node
   emscripten::val buildNodeRec(const tinyusdz::tydra::Node &rnode) {
@@ -1415,6 +1587,11 @@ EMSCRIPTEN_BINDINGS(tinyusdz_module) {
       .function("getURI", &TinyUSDZLoaderNative::getURI)
       .function("getMesh", &TinyUSDZLoaderNative::getMesh)
       .function("numMeshes", &TinyUSDZLoaderNative::numMeshes)
+      .function("getSceneMeta", &TinyUSDZLoaderNative::getSceneMeta)
+      .function("getSkeleton", &TinyUSDZLoaderNative::getSkeleton)
+      .function("numSkeletons", &TinyUSDZLoaderNative::numSkeletons)
+      .function("getAnimation", &TinyUSDZLoaderNative::getAnimation)
+      .function("numAnimations", &TinyUSDZLoaderNative::numAnimations)
       .function("getMaterial", &TinyUSDZLoaderNative::getMaterial)
       .function("getTexture", &TinyUSDZLoaderNative::getTexture)
       .function("getImage", &TinyUSDZLoaderNative::getImage)
