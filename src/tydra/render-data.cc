@@ -5154,9 +5154,18 @@ bool RenderSceneConverter::ConvertMaterial(const RenderSceneConverterEnv &env,
     if (!env.stage.find_prim_at_path(
             Path(surfacePath.prim_part(), /* prop part */ ""), shaderPrim,
             &err)) {
-      PUSH_ERROR_AND_RETURN(fmt::format(
-          "{}'s outputs:surface isn't connected to exising Prim path.\n",
+      // Dangling connection. Some assets (e.g. Reality Composer exports)
+      // only bake a UsdPreviewSurface for the default variant and author
+      // MaterialX-only shading for the others, leaving outputs:surface
+      // pointing at a prim that doesn't exist. Degrade to a default
+      // material like the unauthored-surface case instead of failing the
+      // whole scene.
+      PUSH_WARN(fmt::format(
+          "{}'s outputs:surface isn't connected to existing Prim path. "
+          "Create a default Material.\n",
           mat_abs_path.full_path_name()));
+      (*rmat_out) = rmat;
+      return true;
     }
 
     if (!shaderPrim) {

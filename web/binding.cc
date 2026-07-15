@@ -1191,6 +1191,86 @@ class TinyUSDZLoaderNative {
     return tinyusdz::HasVariants(composited_ ? composed_layer_ : layer_ );
   }
 
+  // Enumerate variant sets in the (pre-composition) layer's PrimSpec tree.
+  // Returns [{path, setName, options: [names...], selected}].
+  // Must be called BEFORE composeVariants(): composition strips variant
+  // metadata from the composed layer.
+  emscripten::val listVariantSets() {
+    emscripten::val arr = emscripten::val::array();
+    if (!loaded_as_layer_) return arr;
+    tinyusdz::Layer &layer = composited_ ? composed_layer_ : layer_;
+    uint32_t idx = 0;
+    for (auto &root : layer.primspecs()) {
+      listVariantSetsRec("/" + root.first, root.second, arr, idx);
+    }
+    return arr;
+  }
+
+  // composeVariants() with explicit selections:
+  //   selections = { "<primPath>": { "<setName>": "<variantName>", ... }, ... }
+  // Unlisted prims/sets keep their authored default selection.
+  bool composeVariantsWithSelection(emscripten::val selections) {
+    if (composited_) {
+      layer_ = std::move(composed_layer_);
+      composited_ = false;
+    }
+    for (auto &root : layer_.primspecs()) {
+      applyVariantSelectionRec("/" + root.first, root.second, selections);
+    }
+    return composeVariants();
+  }
+
+ private:
+  static void listVariantSetsRec(const std::string &path,
+                                 tinyusdz::PrimSpec &ps,
+                                 emscripten::val &arr, uint32_t &idx) {
+    for (auto &vs : ps.variantSets()) {
+      emscripten::val item = emscripten::val::object();
+      item.set("path", path);
+      item.set("setName", vs.first);
+      emscripten::val opts = emscripten::val::array();
+      uint32_t oi = 0;
+      for (const auto &opt : vs.second.variantSet) {
+        opts.set(oi++, opt.first);
+      }
+      item.set("options", opts);
+      std::string sel;
+      ps.current_variant_selection(vs.first, &sel);
+      item.set("selected", sel);
+      arr.set(idx++, item);
+    }
+    for (auto &child : ps.children()) {
+      listVariantSetsRec(path + "/" + child.name(), child, arr, idx);
+    }
+  }
+
+  static void applyVariantSelectionRec(const std::string &path,
+                                       tinyusdz::PrimSpec &ps,
+                                       emscripten::val &selections) {
+    emscripten::val sel = selections[path];
+    if (!sel.isUndefined() && !sel.isNull()) {
+      emscripten::val keys =
+          emscripten::val::global("Object").call<emscripten::val>("keys", sel);
+      const int n = keys["length"].as<int>();
+      for (int i = 0; i < n; i++) {
+        const std::string set = keys[i].as<std::string>();
+        const std::string name = sel[set].as<std::string>();
+        if (ps.metas().variants) {
+          ps.metas().variants.value()[set] = name;
+        } else {
+          tinyusdz::VariantSelectionMap m;
+          m[set] = name;
+          ps.metas().variants = m;
+        }
+      }
+    }
+    for (auto &child : ps.children()) {
+      applyVariantSelectionRec(path + "/" + child.name(), child, selections);
+    }
+  }
+
+ public:
+
   bool composeVariants() {
 
     if (composited_) {
@@ -1660,6 +1740,10 @@ EMSCRIPTEN_BINDINGS(tinyusdz_module) {
 
       .function("composeVariants",
                 &TinyUSDZLoaderNative::composeVariants)
+      .function("listVariantSets",
+                &TinyUSDZLoaderNative::listVariantSets)
+      .function("composeVariantsWithSelection",
+                &TinyUSDZLoaderNative::composeVariantsWithSelection)
 
       .function("layerToRenderScene",
                 &TinyUSDZLoaderNative::layerToRenderScene)
