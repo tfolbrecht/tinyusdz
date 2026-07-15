@@ -2733,7 +2733,8 @@ bool USDCReader::Impl::ReconstructPrimNode(int parent, int current, int level,
 
       break;
     }
-    case SpecType::Attribute: {
+    case SpecType::Attribute:
+    case SpecType::Relationship: {
       if (is_parent_variant) {
         nonstd::optional<Path> path = GetPath(spec.path_index);
 
@@ -2766,7 +2767,6 @@ bool USDCReader::Impl::ReconstructPrimNode(int parent, int current, int level,
       break;
     }
     case SpecType::Connection:
-    case SpecType::Relationship:
     case SpecType::RelationshipTarget: {
       PUSH_ERROR_AND_RETURN_TAG(
           kTag, fmt::format("TODO: Unsupported/Unimplemented SpecType: {}.",
@@ -3231,7 +3231,8 @@ bool USDCReader::Impl::ReconstructPrimSpecNode(int parent, int current, int leve
 
       break;
     }
-    case SpecType::Attribute: {
+    case SpecType::Attribute:
+    case SpecType::Relationship: {
       if (is_parent_variant) {
         nonstd::optional<Path> path = GetPath(spec.path_index);
 
@@ -3264,7 +3265,6 @@ bool USDCReader::Impl::ReconstructPrimSpecNode(int parent, int current, int leve
       break;
     }
     case SpecType::Connection:
-    case SpecType::Relationship:
     case SpecType::RelationshipTarget: {
       PUSH_ERROR_AND_RETURN_TAG(
           kTag, fmt::format("TODO: Unsupported/Unimplemented SpecType: {}.",

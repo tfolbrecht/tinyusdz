@@ -1099,18 +1099,35 @@ nonstd::expected<VertexAttribute, std::string> GetTextureCoordinate(
                                    "\n");
   }
 
-  // TODO: allow float2?
-  if (primvar.get_type_id() !=
-      value::TypeTraits<std::vector<value::texcoord2f>>::type_id()) {
+  // texCoord2f is a role alias of float2; accept both (e.g. Apple's AR
+  // Quick Look gallery assets author `primvars:st` as float2[]).
+  const uint32_t tc2_tid =
+      value::TypeTraits<std::vector<value::texcoord2f>>::type_id();
+  const uint32_t f2_tid =
+      value::TypeTraits<std::vector<value::float2>>::type_id();
+  const uint32_t prim_tid = primvar.get_type_id();
+  if ((prim_tid != tc2_tid) && (prim_tid != f2_tid)) {
     return nonstd::make_unexpected(
-        "Texture coordinate primvar must be texCoord2f[] type, but got " +
+        "Texture coordinate primvar must be texCoord2f[] or float2[] type, but got " +
         primvar.get_type_name() + "\n");
   }
 
   std::vector<value::texcoord2f> uvs;
-  if (!primvar.flatten_with_indices(t, &uvs, tinterp)) {
-    return nonstd::make_unexpected(
-        "Failed to retrieve texture coordinate primvar with concrete type.\n");
+  if (prim_tid == tc2_tid) {
+    if (!primvar.flatten_with_indices(t, &uvs, tinterp)) {
+      return nonstd::make_unexpected(
+          "Failed to retrieve texture coordinate primvar with concrete type.\n");
+    }
+  } else {
+    std::vector<value::float2> f2s;
+    if (!primvar.flatten_with_indices(t, &f2s, tinterp)) {
+      return nonstd::make_unexpected(
+          "Failed to retrieve texture coordinate primvar with concrete type.\n");
+    }
+    static_assert(sizeof(value::texcoord2f) == sizeof(value::float2),
+                  "texcoord2f/float2 layout mismatch");
+    uvs.resize(f2s.size());
+    memcpy(uvs.data(), f2s.data(), f2s.size() * sizeof(value::float2));
   }
 
   if (primvar.get_interpolation() == Interpolation::Varying) {
